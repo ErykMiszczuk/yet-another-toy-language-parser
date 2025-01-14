@@ -1,7 +1,17 @@
 const EMPTY_STRING = "";
 const NEW_LINE = "\n";
 
-export class InputStream {
+export interface IInputStream {
+  get pos(): number;
+  get line(): number;
+  get column(): number;
+  peek(): string;
+  eof(): boolean;
+  next(): string;
+  error(msg: string): void;
+}
+
+export class InputStream implements IInputStream {
   #input;
   #pos = 0;
   #line = 1;
