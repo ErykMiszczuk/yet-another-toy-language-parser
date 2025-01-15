@@ -8,7 +8,8 @@ export const keywords = new Set([
   "true",
   "false",
 ]);
-export const EToken = {
+
+export const ETokenType = {
   NUM: "num",
   STR: "str",
   KW: "kw",
@@ -16,13 +17,59 @@ export const EToken = {
   PUNC: "punc",
   OP: "op",
 } as const;
-type ETokenType = typeof EToken[keyof typeof EToken];
 
-// deno-lint-ignore no-explicit-any
-const createToken = (type: ETokenType, value: any) => ({ type, value });
+type ETokenTypeKey = keyof typeof ETokenType;
+type ETokenTypeValue = typeof ETokenType[ETokenTypeKey];
 
-export class TokenStream {
-  #current = null;
+type TokenValueType<T extends ETokenTypeValue> = T extends typeof ETokenType.NUM
+  ? number
+  : T extends typeof ETokenType.STR ? string
+  : T extends typeof ETokenType.OP ? string
+  : T extends typeof ETokenType.KW ? string
+  : T extends typeof ETokenType.PUNC ? string
+  : T extends typeof ETokenType.VAR ? string
+  : never;
+
+type Token<T extends ETokenTypeValue> = {
+  type: T;
+  value: TokenValueType<T>;
+};
+const createToken = <T extends ETokenTypeValue>(
+  type: T,
+  value: TokenValueType<T>,
+): Token<T> => ({ type, value });
+
+export interface ITokenStream {
+  isKeyword(x: string): boolean;
+  isDigit(char: string): boolean;
+  isIdStart(char: string): boolean;
+  isId(char: string): boolean;
+  isOpChar(char: string): boolean;
+  isPunc(char: string): boolean;
+  isWhitespace(char: string): boolean;
+  readWhile(x: () => void): void;
+  readNumber(): Token<typeof ETokenType.NUM>;
+  readIdent(): Token<typeof ETokenType.KW> | Token<typeof ETokenType.VAR>;
+  readEscaped(str: string): string;
+  readString(): Token<typeof ETokenType.STR>;
+  skipComment(): void;
+  readNext(): ReadNextReturn;
+  peek(): ReadNextReturn;
+  next(): void;
+  eof(): void;
+}
+
+type ReadNextReturn =
+  | undefined
+  | Token<typeof ETokenType.KW>
+  | Token<typeof ETokenType.NUM>
+  | Token<typeof ETokenType.OP>
+  | Token<typeof ETokenType.PUNC>
+  | Token<typeof ETokenType.STR>
+  | Token<typeof ETokenType.VAR>;
+
+export class TokenStream implements ITokenStream {
+  #current: ReadNextReturn;
   #input: IInputStream;
 
   constructor(stream: IInputStream) {
@@ -76,12 +123,12 @@ export class TokenStream {
       }
       return this.isDigit(char);
     });
-    return createToken(EToken.NUM, parseFloat(number));
+    return createToken(ETokenType.NUM, parseFloat(number));
   }
 
   readIdent() {
     const id = this.readWhile(this.isId);
-    return createToken(this.isKeyword(id) ? EToken.KW : EToken.VAR, id);
+    return createToken(this.isKeyword(id) ? ETokenType.KW : ETokenType.VAR, id);
   }
 
   readEscaped(end: string) {
@@ -89,7 +136,7 @@ export class TokenStream {
     let str = "";
     this.#input.next();
     while (!this.#input.eof()) {
-      let char = this.#input.next();
+      const char = this.#input.next();
       if (escaped) {
         str += char;
         escaped = false;
@@ -105,7 +152,7 @@ export class TokenStream {
   }
 
   readString() {
-    return createToken(EToken.STR, this.readEscaped('"'));
+    return createToken(ETokenType.STR, this.readEscaped('"'));
   }
 
   skipComment() {
@@ -113,8 +160,7 @@ export class TokenStream {
     this.#input.next();
   }
 
-  // deno-lint-ignore no-explicit-any
-  readNext(): any {
+  readNext(): ReadNextReturn {
     this.readWhile(this.isWhitespace);
     if (this.#input.eof()) return;
 
@@ -126,9 +172,11 @@ export class TokenStream {
     if (char === '"') return this.readString();
     if (this.isDigit(char)) return this.readNumber();
     if (this.isIdStart(char)) return this.readIdent();
-    if (this.isPunc(char)) return createToken(EToken.PUNC, this.#input.next());
+    if (this.isPunc(char)) {
+      return createToken(ETokenType.PUNC, this.#input.next());
+    }
     if (this.isOpChar(char)) {
-      return createToken(EToken.OP, this.readWhile(this.isOpChar));
+      return createToken(ETokenType.OP, this.readWhile(this.isOpChar));
     }
     this.#input.error(
       `Can't handle character: (${char}) @ line: ${this.#input.line}:${this.#input.column}`,
@@ -136,12 +184,13 @@ export class TokenStream {
   }
 
   peek() {
-    return this.#current || (this.#current = this.readNext());
+    if (!this.#current) this.#current = this.readNext();
+    return this.#current;
   }
 
   next() {
-    let token = this.#current;
-    this.#current = null;
+    const token = this.#current;
+    this.#current = undefined;
     return token || this.readNext();
   }
 
