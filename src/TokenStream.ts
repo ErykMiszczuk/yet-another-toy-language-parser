@@ -10,15 +10,12 @@ export const keywords = new Set([
 ]);
 
 export const ETokenType = {
-  INIT: "init",
   NUM: "num",
   STR: "str",
   KW: "kw",
   VAR: "var",
   PUNC: "punc",
   OP: "op",
-  EOF: "eof",
-  ERR: "err",
 } as const;
 
 type ETokenTypeKey = keyof typeof ETokenType;
@@ -31,9 +28,6 @@ type TokenValueType<T extends ETokenTypeValue> = T extends typeof ETokenType.NUM
   : T extends typeof ETokenType.KW ? string
   : T extends typeof ETokenType.PUNC ? string
   : T extends typeof ETokenType.VAR ? string
-  : T extends typeof ETokenType.EOF ? null
-  : T extends typeof ETokenType.INIT ? null
-  : T extends typeof ETokenType.ERR ? string
   : never;
 
 type Token<T extends ETokenTypeValue> = {
@@ -48,7 +42,7 @@ const createToken = <T extends ETokenTypeValue>(
 export interface ITokenStream {
   isKeyword(x: string): boolean;
   isDigit(char: string): boolean;
-  isIdStart(char: string): boolean;
+  isIdStarting(char: string): boolean;
   isId(char: string): boolean;
   isOpChar(char: string): boolean;
   isPunc(char: string): boolean;
@@ -60,29 +54,31 @@ export interface ITokenStream {
   readString(): Token<typeof ETokenType.STR>;
   skipComment(): void;
   readNext(): ReadNextReturn;
-  peek(): ReadNextReturn;
-  next(): ReadNextReturn;
+  peek(): ReadReturn;
+  next(): ReadReturn;
   eof(): boolean;
   error(msg: string): void;
 }
 
-type ReadNextReturn =
+type ReadReturn =
   | Token<typeof ETokenType.KW>
   | Token<typeof ETokenType.NUM>
   | Token<typeof ETokenType.OP>
   | Token<typeof ETokenType.PUNC>
   | Token<typeof ETokenType.STR>
-  | Token<typeof ETokenType.VAR>
-  | Token<typeof ETokenType.INIT>
-  | Token<typeof ETokenType.ERR>
-  | Token<typeof ETokenType.EOF>;
+  | Token<typeof ETokenType.VAR>;
+
+type ReadNextReturn =
+  | ReadReturn
+  | undefined;
 
 export class TokenStream implements ITokenStream {
-  #current: ReadNextReturn = createToken(ETokenType.INIT, null);
+  #current: ReadNextReturn;
   #input: IInputStream;
 
   constructor(stream: IInputStream) {
     this.#input = stream;
+    this.isId = this.isId.bind(this);
   }
 
   isKeyword(x: string) {
@@ -93,12 +89,12 @@ export class TokenStream implements ITokenStream {
     return /[0-9]/i.test(char);
   }
 
-  isIdStart(char: string) {
+  isIdStarting(char: string) {
     return /[a-z]/i.test(char);
   }
 
   isId(char: string) {
-    return this.isIdStart(char) || "?!-0<1>2=3456789".indexOf(char) >= 0;
+    return this.isIdStarting(char) || "?!-0<1>2=3456789_".indexOf(char) >= 0;
   }
 
   isOpChar(char: string) {
@@ -113,8 +109,7 @@ export class TokenStream implements ITokenStream {
     return " \t\n".indexOf(char) >= 0;
   }
 
-  // deno-lint-ignore no-explicit-any
-  readWhile(predicate: (x: any) => void) {
+  readWhile(predicate: CallableFunction) {
     let str = "";
     while (!this.#input.eof() && predicate(this.#input.peek())) {
       str += this.#input.next();
@@ -165,13 +160,13 @@ export class TokenStream implements ITokenStream {
   }
 
   skipComment() {
-    this.readWhile((ch) => ch != "\n");
+    this.readWhile((ch: string) => ch != "\n");
     this.#input.next();
   }
 
   readNext(): ReadNextReturn {
     this.readWhile(this.isWhitespace);
-    if (this.#input.eof()) return createToken(ETokenType.INIT, null);
+    if (this.#input.eof()) return;
 
     const char = this.#input.peek();
     if (char === "#") {
@@ -180,7 +175,7 @@ export class TokenStream implements ITokenStream {
     }
     if (char === '"') return this.readString();
     if (this.isDigit(char)) return this.readNumber();
-    if (this.isIdStart(char)) return this.readIdent();
+    if (this.isIdStarting(char)) return this.readIdent();
     if (this.isPunc(char)) {
       return createToken(ETokenType.PUNC, this.#input.next());
     }
@@ -190,21 +185,23 @@ export class TokenStream implements ITokenStream {
     this.#input.error(
       `Can't handle character: (${char}) @ line: ${this.#input.line}:${this.#input.column}`,
     );
-    return createToken(
-      ETokenType.ERR,
-      `Can't handle character: (${char}) @ line: ${this.#input.line}:${this.#input.column}`,
-    );
+  }
+
+  getNextDefinedToken() {
+    let tok = this.readNext();
+    while (!tok) tok = this.readNext();
+    return tok;
   }
 
   peek() {
-    if (!this.#current) this.#current = this.readNext();
+    if (!this.#current) this.#current = this.getNextDefinedToken();
     return this.#current;
   }
 
   next() {
     const token = this.#current;
-    this.#current = createToken(ETokenType.INIT, null);
-    return token || this.readNext();
+    this.#current = undefined;
+    return token ? token : this.getNextDefinedToken();
   }
 
   eof() {

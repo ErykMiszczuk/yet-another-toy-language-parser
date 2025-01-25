@@ -44,7 +44,8 @@ export class Parser {
   }
 
   skipPunc(char: string) {
-    if (this.isPunc(char)) this.#input.next();
+    const isThisIt = this.isPunc(char);
+    if (isThisIt) this.#input.next();
     else this.#input.error(String.raw`Expecting punctation: ${char}`);
   }
 
@@ -68,10 +69,9 @@ export class Parser {
   maybeBinary(left: any, myPrec: any): any {
     const tok = this.#input.peek();
     if (!tok) return this.#input.error("Unexpected token");
-    if (
-      tok.type === ETokenType.NUM || tok.type === ETokenType.ERR ||
-      tok.type === ETokenType.INIT || tok.type === ETokenType.EOF
-    ) {
+
+    // if (this.#input.peek().type === ETokenType.INIT) this.#input.next();
+    if (tok.type === ETokenType.NUM) {
       return this.#input.error(`Received unexpected token of type ${tok.type}`);
     }
     if (this.isOp(tok.value)) {
@@ -193,6 +193,7 @@ export class Parser {
     const prog = [];
     while (!this.#input.eof()) {
       prog.push(this.parseExpression());
+      console.log(JSON.stringify(prog));
       if (!this.#input.eof()) this.skipPunc(";");
     }
     return { type: "prog", prog };
