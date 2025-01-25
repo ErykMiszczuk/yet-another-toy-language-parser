@@ -10,12 +10,15 @@ export const keywords = new Set([
 ]);
 
 export const ETokenType = {
+  INIT: "init",
   NUM: "num",
   STR: "str",
   KW: "kw",
   VAR: "var",
   PUNC: "punc",
   OP: "op",
+  EOF: "eof",
+  ERR: "err",
 } as const;
 
 type ETokenTypeKey = keyof typeof ETokenType;
@@ -28,6 +31,9 @@ type TokenValueType<T extends ETokenTypeValue> = T extends typeof ETokenType.NUM
   : T extends typeof ETokenType.KW ? string
   : T extends typeof ETokenType.PUNC ? string
   : T extends typeof ETokenType.VAR ? string
+  : T extends typeof ETokenType.EOF ? null
+  : T extends typeof ETokenType.INIT ? null
+  : T extends typeof ETokenType.ERR ? string
   : never;
 
 type Token<T extends ETokenTypeValue> = {
@@ -55,21 +61,24 @@ export interface ITokenStream {
   skipComment(): void;
   readNext(): ReadNextReturn;
   peek(): ReadNextReturn;
-  next(): void;
-  eof(): void;
+  next(): ReadNextReturn;
+  eof(): boolean;
+  error(msg: string): void;
 }
 
 type ReadNextReturn =
-  | undefined
   | Token<typeof ETokenType.KW>
   | Token<typeof ETokenType.NUM>
   | Token<typeof ETokenType.OP>
   | Token<typeof ETokenType.PUNC>
   | Token<typeof ETokenType.STR>
-  | Token<typeof ETokenType.VAR>;
+  | Token<typeof ETokenType.VAR>
+  | Token<typeof ETokenType.INIT>
+  | Token<typeof ETokenType.ERR>
+  | Token<typeof ETokenType.EOF>;
 
 export class TokenStream implements ITokenStream {
-  #current: ReadNextReturn;
+  #current: ReadNextReturn = createToken(ETokenType.INIT, null);
   #input: IInputStream;
 
   constructor(stream: IInputStream) {
@@ -162,7 +171,7 @@ export class TokenStream implements ITokenStream {
 
   readNext(): ReadNextReturn {
     this.readWhile(this.isWhitespace);
-    if (this.#input.eof()) return;
+    if (this.#input.eof()) return createToken(ETokenType.INIT, null);
 
     const char = this.#input.peek();
     if (char === "#") {
@@ -181,6 +190,10 @@ export class TokenStream implements ITokenStream {
     this.#input.error(
       `Can't handle character: (${char}) @ line: ${this.#input.line}:${this.#input.column}`,
     );
+    return createToken(
+      ETokenType.ERR,
+      `Can't handle character: (${char}) @ line: ${this.#input.line}:${this.#input.column}`,
+    );
   }
 
   peek() {
@@ -190,11 +203,15 @@ export class TokenStream implements ITokenStream {
 
   next() {
     const token = this.#current;
-    this.#current = undefined;
+    this.#current = createToken(ETokenType.INIT, null);
     return token || this.readNext();
   }
 
   eof() {
     return this.peek() == null;
+  }
+
+  error(msg: string) {
+    return this.#input.error(msg);
   }
 }
