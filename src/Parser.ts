@@ -22,6 +22,9 @@ export class Parser {
 
   constructor(tokenStream: ITokenStream) {
     this.#input = tokenStream;
+    this.maybeCall = this.maybeCall.bind(this);
+    this.parseExpression = this.parseExpression.bind(this);
+    this.parseVarname = this.parseVarname.bind(this);
   }
 
   isPunc(char: string) {
@@ -40,7 +43,7 @@ export class Parser {
   isOp(op: string) {
     const tok = this.#input.peek();
     if (!tok) return false;
-    return tok.type === ETokenType.KW && tok.value === op;
+    return tok.type === ETokenType.OP && tok.value === op;
   }
 
   skipPunc(char: string) {
@@ -68,23 +71,25 @@ export class Parser {
   // deno-lint-ignore no-explicit-any
   maybeBinary(left: any, myPrec: any): any {
     const tok = this.#input.peek();
-    if (!tok) return this.#input.error("Unexpected token");
+    if (tok) {
+      // if (this.#input.peek().type === ETokenType.INIT) this.#input.next();
+      if (tok.type === ETokenType.NUM) {
+        return this.#input.error(
+          `Received unexpected token of type ${tok.type}`,
+        );
+      }
+      if (this.isOp(tok.value)) {
+        const hisPrec = PRECEDENCE.get(tok.value) ?? 0;
+        if (hisPrec > myPrec) {
+          this.#input.next();
 
-    // if (this.#input.peek().type === ETokenType.INIT) this.#input.next();
-    if (tok.type === ETokenType.NUM) {
-      return this.#input.error(`Received unexpected token of type ${tok.type}`);
-    }
-    if (this.isOp(tok.value)) {
-      const hisPrec = PRECEDENCE.get(tok.value) ?? 0;
-      if (hisPrec > myPrec) {
-        this.#input.next();
-
-        return this.maybeBinary({
-          type: tok.value === "=" ? "assign" : "binary",
-          operator: tok.value,
-          right: this.maybeBinary(this.parseAtom(), hisPrec),
-          left,
-        }, myPrec);
+          return this.maybeBinary({
+            type: tok.value === "=" ? "assign" : "binary",
+            operator: tok.value,
+            right: this.maybeBinary(this.parseAtom(), hisPrec),
+            left,
+          }, myPrec);
+        }
       }
     }
 
@@ -120,7 +125,7 @@ export class Parser {
   }
 
   parseVarname() {
-    const name = this.#input.next();
+    const name = this.#input.next()!;
     if (name.type != ETokenType.VAR) {
       this.#input.error("Expecting variable name");
     }
@@ -156,13 +161,14 @@ export class Parser {
   parseBool() {
     return {
       type: "bool",
-      value: this.#input.next().value == "true",
+      value: this.#input.next()!.value == "true",
     };
   }
 
   maybeCall(expr: CallableFunction) {
     expr = expr();
-    return this.isPunc("(") ? this.parseCall : expr;
+    // @ts-expect-error: types are are completely mangled because source implementation was using pure js with suprising amount of errors
+    return this.isPunc("(") ? this.parseCall(expr) : expr;
   }
 
   parseAtom() {
@@ -181,10 +187,12 @@ export class Parser {
         return this.parseLambda();
       }
       const tok = this.#input.next();
+      if (!tok) return;
       if (
         tok.type === ETokenType.VAR || tok.type === ETokenType.NUM ||
-        tok.type === ETokenType.STR
+        tok.type === ETokenType.STR || tok.type === ETokenType.OP
       ) return tok;
+      if (tok.type === ETokenType.PUNC) return;
       this.unexpected();
     });
   }
@@ -193,15 +201,15 @@ export class Parser {
     const prog = [];
     while (!this.#input.eof()) {
       prog.push(this.parseExpression());
-      console.log(JSON.stringify(prog));
-      if (!this.#input.eof()) this.skipPunc(";");
+      // console.log(JSON.stringify(prog));
+      // if (!this.#input.eof()) this.skipPunc(";");
     }
     return { type: "prog", prog };
   }
 
   parseProg() {
     const prog = this.delimited("{", "}", ";", this.parseExpression);
-    if (prog.length == 0) return false;
+    if (prog.length == 0) return { type: "bool", value: false };
     if (prog.length == 1) return prog[0];
     return { type: "prog", prog };
   }

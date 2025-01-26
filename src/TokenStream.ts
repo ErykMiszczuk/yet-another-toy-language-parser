@@ -54,8 +54,8 @@ export interface ITokenStream {
   readString(): Token<typeof ETokenType.STR>;
   skipComment(): void;
   readNext(): ReadNextReturn;
-  peek(): ReadReturn;
-  next(): ReadReturn;
+  peek(): ReadNextReturn;
+  next(): ReadNextReturn;
   eof(): boolean;
   error(msg: string): void;
 }
@@ -187,25 +187,20 @@ export class TokenStream implements ITokenStream {
     );
   }
 
-  getNextDefinedToken() {
-    let tok = this.readNext();
-    while (!tok) tok = this.readNext();
-    return tok;
-  }
-
   peek() {
-    if (!this.#current) this.#current = this.getNextDefinedToken();
+    if (!this.#current) this.#current = this.readNext();
     return this.#current;
   }
 
   next() {
     const token = this.#current;
     this.#current = undefined;
-    return token ? token : this.getNextDefinedToken();
+    return token ? token : this.readNext();
   }
 
   eof() {
-    return this.peek() == null;
+    const peek = this.peek();
+    return peek == null || peek == undefined;
   }
 
   error(msg: string) {
